@@ -10,13 +10,15 @@
 #include <stdarg.h>
 
 
-void log_use_time_prefix(int toggle)
+inline void log_use_time_prefix(int toggle)
 {
     time_prefix = toggle;
 }
 
-void log_debug(char *format_string, ...)
+
+inline void log_debug(char *format_string, ...)
 {
+    if (log_lv < 5) return;
     va_list args1;
     va_start(args1, format_string);
     va_list args2;
@@ -38,8 +40,10 @@ void log_debug(char *format_string, ...)
     }
 }
 
-void log_info(char *format_string, ...)
+
+inline void log_info(char *format_string, ...)
 {
+    if (log_lv < 2) return;
     va_list args1;
     va_start(args1, format_string);
     va_list args2;
@@ -61,8 +65,10 @@ void log_info(char *format_string, ...)
     }
 }
 
-void log_error(char *format_string, ...)
+
+inline void log_error(char *format_string, ...)
 {
+    if (log_lv < 1)return;
     va_list args1;
     va_start(args1, format_string);
     va_list args2;
@@ -83,8 +89,10 @@ void log_error(char *format_string, ...)
     }
 }
 
-void log_success(char *format_string, ...)
+
+inline void log_success(char *format_string, ...)
 {
+    if (log_lv < 3)return;
     va_list args1;
     va_start(args1, format_string);
     va_list args2;
@@ -105,8 +113,10 @@ void log_success(char *format_string, ...)
     }
 }
 
-void log_warning(char *format_string, ...)
+
+inline void log_warning(char *format_string, ...)
 {
+    if (log_lv < 4)return;
     va_list args1;
     va_start(args1, format_string);
     va_list args2;

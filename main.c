@@ -76,15 +76,25 @@
 #include <sys/sendfile.h>
 #include <errno.h>
 #include <sys/epoll.h>
+#include <stdarg.h>
 
 
-#include "log.h"
-#include "log.c"
+//#include "log.h"
+//#include "log.c"
+
+#define LOG_LEVEL 0
 
 #define  ENABLE_DEBUG 1
 
-#define checkError(ret) do{if(-1==ret){printf("[%d]err:%s\n", __LINE__, strerror(errno));exit(1);}}while(0)
 
+#define checkError(ret) do{if(-1==ret){printf("[%d]err:%s\n", __LINE__, strerror(errno));exit(1);}}while(0)
+#define Send(msg) send(client_fd, msg, strlen(msg), 0)
+
+//#define DEBUG(msg, ...) if (log_lv > 5) log_debug(msg,...)
+//#define log_warning(msg, ...) if (log_lv > 4) log_warning(msg,...)
+//#define log_success(msg, ...) if (log_lv > 3) log_success(msg,...)
+//#define log_info(msg, ...) if (log_lv > 2) log_info(msg,...)
+//error 1
 
 
 
@@ -185,15 +195,176 @@ struct HTTP_MSG {
 
 int init(int argc, char **argv);    // 初始化参数
 int startup() ;                     //开始
-void http_serve(int serve_socket);  // 处理 http 请求
+void http_serve();  // 处理 http 请求
 static void GC_child(int iSig);     // 回收子线程
-inline static void GET(int serve_socket);
+inline static void GET();
+static char *str_dup(char *buf);           // 复制字符串,,后来漏打了 _ 发现也能运行,c 库里面已经实现过了.....
+static char *safe_malloc(size_t size);
+int start_listen();
+int accept_socket(int listen_fd);
+const char *GetMimeType(const char *zName, int nName);
+void parseURl(char *buf);
+static char *Rfc822Date(time_t t);
+time_t ParseRfc822Date(const char *zDate);
+static char *get_element_by_space(char *input, char **next_p);
+char *response_501();
+char *response_bad_request_400();
+char *response_403();
+char *response_404();
+static int send_file(int serve_socket, char *filename);
+int get_line(int sock, char *buf, int size);
+inline static void GET();
+static void GC_child(int iSig);
+
+int time_prefix = 1;
+void log_use_time_prefix(int toggle);
+void log_info(char *format_string, ...);
+void log_error(char *format_string, ...);
+void log_success(char *format_string, ...);
+void log_warning(char *format_string, ...);
+void log_debug(char *format_string, ...);
+
+
+        void test_Rfc822Date();
+//inline Send(char *msg);
 
 
 char *line_buf[1024];           // 从 socket 读取一行缓冲
 char *next_ele = 0;
 int client_fd = -1;
+char final_path[256];          // 凭借 root 后的地址缓冲区
+int log_lv = 2;
 
+
+
+
+void log_use_time_prefix(int toggle)
+{
+    time_prefix = toggle;
+}
+
+
+void log_debug(char *format_string, ...)
+{
+    if (log_lv < 5) return;
+    va_list args1;
+    va_start(args1, format_string);
+    va_list args2;
+    va_copy(args2, args1);
+    char buf[1 + vsnprintf(NULL, 0, format_string, args1)];
+    va_end(args1);
+    vsnprintf(buf, sizeof buf, format_string, args2);
+    va_end(args2);
+
+    if (time_prefix)
+    {
+        time_t t = time(NULL);
+        struct tm tm = *localtime(&t);
+        printf("%d:%d:%d \033[0m\033[1;34m[debug]\033[0m %s", tm.tm_hour, tm.tm_min, tm.tm_sec, buf);
+    }
+    else
+    {
+        printf("\033[0m\033[1;34m[debug]\033[0m %s", buf);
+    }
+}
+
+
+void log_info(char *format_string, ...)
+{
+//    printf("%d",log_lv);
+    if (log_lv < 2) return;
+    va_list args1;
+    va_start(args1, format_string);
+    va_list args2;
+    va_copy(args2, args1);
+    char buf[1 + vsnprintf(NULL, 0, format_string, args1)];
+    va_end(args1);
+    vsnprintf(buf, sizeof buf, format_string, args2);
+    va_end(args2);
+
+    if (time_prefix)
+    {
+        time_t t = time(NULL);
+        struct tm tm = *localtime(&t);
+        printf("%d:%d:%d \033[0m\033[1;34m[INFO]\033[0m %s", tm.tm_hour, tm.tm_min, tm.tm_sec, buf);
+    }
+    else
+    {
+        printf("\033[0m\033[1;34m[INFO]\033[0m %s", buf);
+    }
+}
+
+
+void log_error(char *format_string, ...)
+{
+    if (log_lv < 1)return;
+    va_list args1;
+    va_start(args1, format_string);
+    va_list args2;
+    va_copy(args2, args1);
+    char buf[1 + vsnprintf(NULL, 0, format_string, args1)];
+    va_end(args1);
+    vsnprintf(buf, sizeof buf, format_string, args2);
+    va_end(args2);
+    if (time_prefix)
+    {
+        time_t t = time(NULL);
+        struct tm tm = *localtime(&t);
+        printf("%d:%d:%d \033[0m\033[1;31m[FAIL]\033[0m %s", tm.tm_hour, tm.tm_min, tm.tm_sec, buf);
+    }
+    else
+    {
+        printf("\033[0m\033[1;31m[FAIL]\033[0m %s", buf);
+    }
+}
+
+
+void log_success(char *format_string, ...)
+{
+    if (log_lv < 3)return;
+    va_list args1;
+    va_start(args1, format_string);
+    va_list args2;
+    va_copy(args2, args1);
+    char buf[1 + vsnprintf(NULL, 0, format_string, args1)];
+    va_end(args1);
+    vsnprintf(buf, sizeof buf, format_string, args2);
+    va_end(args2);
+    if (time_prefix)
+    {
+        time_t t = time(NULL);
+        struct tm tm = *localtime(&t);
+        printf("%d:%d:%d \033[0m\033[1;32m[PASS]\033[0m %s", tm.tm_hour, tm.tm_min, tm.tm_sec, buf);
+    }
+    else
+    {
+        printf("\033[0m\033[1;32m[PASS]\033[0m %s", buf);
+    }
+}
+
+
+void log_warning(char *format_string, ...)
+{
+    if (log_lv < 4)return;
+    va_list args1;
+    va_start(args1, format_string);
+    va_list args2;
+    va_copy(args2, args1);
+    char buf[1 + vsnprintf(NULL, 0, format_string, args1)];
+    va_end(args1);
+    vsnprintf(buf, sizeof buf, format_string, args2);
+    va_end(args2);
+    if (time_prefix)
+    {
+        time_t t = time(NULL);
+        struct tm tm = *localtime(&t);
+        printf("%d:%d:%d \033[0m\033[1;33m[WARN]\033[0m %s", tm.tm_hour, tm.tm_min, tm.tm_sec, buf);
+    }
+    else
+    {
+        printf("\033[0m\033[1;33m[WARN]\033[0m %s", buf);
+    }
+}
 
 
 /**
@@ -252,8 +423,8 @@ int start_listen() {
     bzero(&(address.sin_zero), 8);
     DEBUG("BEFORE BIND\n");
     res = bind(fd, (struct sockaddr *) &address, sizeof(address));
-    checkError(res);
     if (-1 == res) {
+        checkError(res);
         log_error("bind socket error!\n");
         DEBUG("%d\n",errno);
         return -1;
@@ -265,7 +436,6 @@ int start_listen() {
         log_error("listen socket error!\n");
         return -2;
     }
-    log_info("listen socket!\n");
     log_success("start listen on %s:%d\n", serve_config.ip, serve_config.port);
     return fd;
 }
@@ -863,39 +1033,33 @@ int get_line(int sock, char *buf, int size) {
 }
 
 
-inline static void GET(int serve_socket) {
-//    int
-    // TEST
-//    send(serve_socket,response_bad_request_400(),strlen(response_bad_request_400()),0);
-    //TEST END
+inline static void GET() {
     log_info("GET in path :%s\n", http_msg.path);
     FILE *fin = 0;
     if (http_msg.path == 0) {
         log_error("GET :error path!\n");
-        send(serve_socket, response_bad_request_400(), strlen(response_bad_request_400()), 0);
+        send(client_fd, response_bad_request_400(), strlen(response_bad_request_400()), 0);
     }
     parseURl(http_msg.path);
     log_info("path after parse: %s\n", http_msg.path);
     // 路径过长，拒绝访问
     if (strlen(http_msg.path) > 200) {
         log_error("GET :too long path!\n");
-        char *res = response_403();
-        send(serve_socket, res, strlen(res), 0);
+        Send(response_403());
         exit(0);
     }
-    char tmp_path[256] = {0};
-    strcat(tmp_path, serve_config.root);
-    if (*http_msg.path != '/') {
+    strcat(final_path, serve_config.root);
+    if (http_msg.path[0] != '/') {
         log_error("path not start with '/'!\n");
-        char *res = response_403();
-        send(serve_socket, res, strlen(res), 0);
+        Send(response_403());
         exit(0);
     }
-    strcat(tmp_path, http_msg.path + 1);      // 忽略 / 符号
-    log_info("request path: %s\n", tmp_path);
-    log_info("path: %s\n", http_msg.path);
-
-    send_file(serve_socket, tmp_path);
+    if (http_msg.path[1] == 0)
+    {
+        strcat(http_msg.path,"index.html");
+    }
+    strcat(final_path, http_msg.path + 1);      // 忽略 / 符号
+    send_file(client_fd, final_path);
 }
 
 
@@ -905,40 +1069,48 @@ static void GC_child(int iSig) {
     }
 }
 
-void http_serve(int serve_socket) {
+//inline void Send(char* msg)
+//{
+//    send(client_fd, msg, strlen(msg), 0);
+//}
+
+void http_serve() {
     alarm(serve_config.timeout);
     signal(SIGALRM, serve_config.timeout);
-
+    DEBUG("http_serve\n");
+//    Send(response_404());
+//    send(client_fd,response_404(), strlen(response_404()),0);
+//    close(client_fd);
+//    exit(0);
     // 设置 alarm 以便处理超时 退出进程
 //    static char line_buf[1024];
 //    static char *next_ele = 0;
     char *res = 0;              //  暂存返回字符串指针
-    get_line(serve_socket, line_buf, 1024);
-    http_msg.method = get_element_by_space(line_buf, &next_ele);
-    http_msg.path = get_element_by_space(next_ele, &next_ele);
-    http_msg.protocol = get_element_by_space(next_ele, &next_ele);
+    get_line(client_fd, line_buf, 1024);
+    http_msg.method   = strdup(get_element_by_space(line_buf, &next_ele));
+    http_msg.path     = strdup(get_element_by_space(next_ele, &next_ele));
+    http_msg.protocol = strdup(get_element_by_space(next_ele, &next_ele));
     log_info("methd: %s path: %s prtcl: %s\n", http_msg.method, http_msg.path, http_msg.protocol);
     // 非 HTTP 协议 或 非支持的 HTTP 版本
     if (http_msg.protocol == 0 || strncmp(http_msg.protocol, "HTTP/", 5) != 0 || strlen(http_msg.protocol) != 8) {
         log_error("unavliable protocol: %s\n", http_msg.protocol);
         res = response_bad_request_400();
-        send(serve_socket, res, strlen(res), 0);
+        send(client_fd, res, strlen(res), 0);
         exit(0);
     }
     // 不支持的请求头
     if (strcmp("GET", http_msg.method) == 0) {
         log_info("GET MOV IN PATH: %s\n", http_msg.path);
-        GET(serve_socket);
+        GET(client_fd);
     } else if (strcmp("POST", http_msg.path) == 0) {
-        send(serve_socket, response_501(), strlen(response_501()), 0);
+        Send(response_501());
     } else if (strcmp("HEAD", http_msg.path) == 0) {
-        send(serve_socket, response_501(), strlen(response_501()), 0);
+        Send(response_501());
     } else {
-        send(serve_socket, response_501(), strlen(response_501()), 0);
-//        if (http_msg->alive == 0)
+        Send(response_501());
         exit(0);
     }
-    close(serve_socket);
+    close(client_fd);
     return;
 
 }
@@ -995,7 +1167,7 @@ void http_serve(int serve_socket) {
  */
 int startup() {
     log_info("start...\n");
-    int client_fd = -1;
+//    int client_fd = -1;
     int listen_fd = start_listen();
     if (listen_fd == -1) {
         log_error("start listen failed!\n");
@@ -1081,6 +1253,14 @@ int init(int argc, char **argv) {
             }
             serve_config.max_client = p;
             log_info("max client set as %d\n", p);
+        }else if (strcmp("--log", z) == 0 || strcmp("-l", z) == 0) {
+            unsigned int p = atoi(zArg);
+            if (p == 0 && zArg[0] != '0') {
+                log_error("log [%s] error!\n", zArg);
+                return 0;
+            }
+            log_lv = p;
+            log_info("log set as %d\n", p);
         } else if (strcmp("--ip", z) == 0 || strcmp("-i", z) == 0) {
             serve_config.ip = str_dup(zArg);
             DEBUG("ip set as %s\n", serve_config.ip);
@@ -1110,7 +1290,6 @@ int init(int argc, char **argv) {
 }
 
 
-
 int main(int argc, char **argv) {
     if (0 == init(argc, argv)) {
         log_info("start fail!\n");
@@ -1118,9 +1297,10 @@ int main(int argc, char **argv) {
     }
     int res = startup();
     if (res) {
-        http_serve(res);
+        http_serve();
+        exit(0);
     }
-
+    exit(0);
     return 0;
 }
 
