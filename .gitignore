@@ -1,8 +1,6 @@
-.idea
-cmake-build-debug
-www2
-wwww
-*.swap
-*.html
-*.css
-*.makefile
+# ignore files 
+# ignore everything
+*.*
+# Add what i want 
+!main.c
+# OK , That's all

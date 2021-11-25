@@ -104,7 +104,7 @@
 #define DEBUG(msg,...) ""
 #endif
 #ifndef DEFAULT_PORT
-#define DEFAULT_PORT 8085
+#define DEFAULT_PORT 8089
 #endif
 #ifndef DEFAULT_ROOT
 #define DEFAULT_ROOT "./"
@@ -234,7 +234,6 @@ char *next_ele = 0;
 int client_fd = -1;
 char final_path[256];          // 凭借 root 后的地址缓冲区
 int log_lv = 2;
-
 
 
 
@@ -962,6 +961,7 @@ static int send_file(int serve_socket, char *filename) {
         log_error("stat file fail! \n\t: %s", filename);
         char *res = response_404();
         send(serve_socket, res, strlen(res), 0);
+        close(serve_socket);
         exit(0);
     }
     log_info("fopen(%s,'rb')\n", filename);
@@ -971,6 +971,7 @@ static int send_file(int serve_socket, char *filename) {
         log_error("open file fail! \n\t: %s\n\terrno: %d\n", filename, errno);
         char *res = response_404();
         send(serve_socket, res, strlen(res), 0);
+        close(serve_socket);
         exit(0);
     }
 
@@ -993,9 +994,11 @@ static int send_file(int serve_socket, char *filename) {
     send(serve_socket, buf, strlen(buf), 0);
 
     sendfile(serve_socket, fileno(fin), 0, stat_buf.st_size);
+    sprintf(buf,"\r\n");
+    send(serve_socket,buf,strlen(buf),0);
     log_info("send file end\n");
-    close(serve_socket);
-    exit(0);
+    // close(serve_socket);
+    // exit(0);
 }
 
 
@@ -1039,6 +1042,8 @@ inline static void GET() {
     if (http_msg.path == 0) {
         log_error("GET :error path!\n");
         send(client_fd, response_bad_request_400(), strlen(response_bad_request_400()), 0);
+        close(client_fd);
+        exit(0);
     }
     parseURl(http_msg.path);
     log_info("path after parse: %s\n", http_msg.path);
@@ -1046,12 +1051,14 @@ inline static void GET() {
     if (strlen(http_msg.path) > 200) {
         log_error("GET :too long path!\n");
         Send(response_403());
+        close(client_fd);
         exit(0);
     }
     strcat(final_path, serve_config.root);
     if (http_msg.path[0] != '/') {
         log_error("path not start with '/'!\n");
         Send(response_403());
+        close(client_fd);
         exit(0);
     }
     if (http_msg.path[1] == 0)
@@ -1060,6 +1067,8 @@ inline static void GET() {
     }
     strcat(final_path, http_msg.path + 1);      // 忽略 / 符号
     send_file(client_fd, final_path);
+    close(client_fd);
+    exit(0);
 }
 
 
@@ -1108,7 +1117,6 @@ void http_serve() {
         Send(response_501());
     } else {
         Send(response_501());
-        exit(0);
     }
     close(client_fd);
     return;
